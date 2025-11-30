@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Ubuntu Internet Radio Station Setup (DarkIce + Icecast) — Practice Guide</title>
+<style>
+ body { font-family: system-ui, sans-serif; padding: 24px; line-height: 1.55; color: #111; }
+ h1, h2 { color: #0a6; }
+ pre { background: #f6f8fa; padding: 12px; border: 1px solid #ddd; overflow: auto; }
+ table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+ th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+ .note { background:#eef6ff; border-left: 4px solid #4aa3ff; padding:10px; margin:14px 0; }
+ .warn { background:#ffecec; border-left:4px solid #ff6b6b; padding:10px; margin:14px 0; }
+</style>
+</head>
+<body>
+<h1>Host an Internet Radio Station on Ubuntu (2025 Practice Guide)</h1>
+<p>This step-by-step guide walks you through installing and running an Icecast streaming server and a radio-style setup (Liquidsoap/AzuraCast) on an Ubuntu computer for practice before moving to a Raspberry Pi.</p>
+
+<nav>
+  <a href="#overview">Overview</a> |
+  <a href="#install">Install Steps</a> |
+  <a href="#azuracast">AzuraCast</a> |
+  <a href="#liquidsoap">Liquidsoap Backup</a> |
+  <a href="#comparison">Comparison</a> |
+  <a href="#troubleshooting">Troubleshooting</a> |
+  <a href="#hardware">Hardware</a>
+</nav>
+
+<section id="overview">
+<h2>Overview</h2>
+<p>Two approaches are included:</p>
+<ul>
+  <li><strong>AzuraCast</strong> — an all-in-one GUI radio automation suite (Docker-based). Recommended if you want a web interface, scheduling, and easy management.</li>
+  <li><strong>Liquidsoap (backup)</strong> — lightweight scripted AutoDJ for manual control or fallback behavior. Good for learning and minimal setups.</li>
+</ul>
+</section>
+
+<section id="install">
+<h2>1. Update Your System</h2>
+<pre><code>sudo apt update
+sudo apt upgrade -y</code></pre>
+
+<h2>2. Install Required Audio & Build Dependencies</h2>
+<pre><code>sudo apt install -y   build-essential autoconf automake libtool   libopus-dev libvorbis-dev libmp3lame-dev libtwolame-dev   libsamplerate0-dev libjack-jackd2-dev libpulse-dev   libasound2-dev libssl-dev git curl</code></pre>
+
+<h2>3. Install Icecast2</h2>
+<pre><code>sudo apt install icecast2</code></pre>
+<p>Edit the config at <code>/etc/icecast2/icecast.xml</code> and set <code>&lt;source-password&gt;</code> and admin credentials. Then enable and start:</p>
+<pre><code>sudo systemctl enable icecast2
+sudo systemctl start icecast2</code></pre>
+
+<h2>4. Build DarkIce with Opus Support (optional)</h2>
+<p>If you want DarkIce (direct encoder), compile it with Opus support. For a radio station setup Liquidsoap or AzuraCast will handle encoding.</p>
+<pre><code>cd ~
+git clone https://github.com/rafael2k/darkice.git
+cd darkice
+./autogen.sh
+./configure --with-opus --with-alsa --with-lame --with-vorbis
+make
+sudo make install</code></pre>
+
+<h2>5. Identify Your Audio Input Device</h2>
+<pre><code>arecord -l</code></pre>
+<p>Note card/device numbers (e.g., <code>card 1: USB, device 0</code>) to use in configs (e.g., <code>hw:1,0</code> or <code>plughw:1,0</code>).</p>
+</section>
+
+<section id="azuracast">
+<h2>Option 2: AzuraCast (Full GUI Radio Automation)</h2>
+<p>AzuraCast is the easiest route if you want a full-featured radio station with a web dashboard.</p>
+
+<h3>Install AzuraCast (Docker Recommended)</h3>
+<ol>
+  <li>Install Docker and Compose:
+    <pre><code>sudo apt update
+sudo apt install docker.io docker-compose-plugin -y
+sudo systemctl enable --now docker</code></pre>
+  </li>
+  <li>Download the AzuraCast installer:
+    <pre><code>cd /opt
+sudo mkdir azuracast
+sudo chown $USER:$USER azuracast
+cd azuracast
+curl -fsSL https://raw.githubusercontent.com/AzuraCast/AzuraCast/main/docker.sh -o docker.sh
+chmod +x docker.sh</code></pre>
+  </li>
+  <li>Install AzuraCast:
+    <pre><code>./docker.sh install</code></pre>
+  </li>
+  <li>Open the dashboard at <code>http://YOUR-SERVER-IP</code>, create an admin account, and follow the setup wizard.</li>
+</ol>
+
+<h3>AzuraCast Features</h3>
+<ul>
+  <li>AutoDJ (Liquidsoap backend)</li>
+  <li>Scheduling & Playlists</li>
+  <li>Live DJ accounts & Web DJ</li>
+  <li>Built-in Icecast</li>
+  <li>Listener stats & metadata</li>
+</ul>
+
+<h3>Recommended AzuraCast Tips</h3>
+<ul>
+  <li>Use Opus as the primary codec for quality and bandwidth efficiency.</li>
+  <li>Enable HTTPS (AzuraCast will handle Let's Encrypt if you provide a domain).</li>
+  <li>Upload jingles and schedule interval blocks for a radio-like sound.</li>
+  <li>Configure failover and backup playlists so the stream never goes silent.</li>
+</ul>
+</section>
+
+<section id="liquidsoap">
+<h2>Option 1 Backup Guide: Liquidsoap (Manual Radio Automation)</h2>
+<p>Liquidsoap is a scripting language for audio streaming — ideal for a lightweight but fully controllable AutoDJ.</p>
+
+<h3>Install Liquidsoap</h3>
+<pre><code>sudo apt update
+sudo apt install liquidsoap liquidsoap-plugin-all</code></pre>
+
+<h3>Basic Liquidsoap Script (AutoDJ + Live Input)</h3>
+<pre><code># myradio.liq
+set("log.level", 3)
+
+live = input.alsa(device="default")
+music = playlist("/home/YOURUSER/music")
+radio = fallback([live, music])
+
+output.icecast(
+  %opus(bitrate=128),
+  host="localhost",
+  port=8000,
+  password="YOUR_ICECAST_SOURCE_PASSWORD",
+  mount="/stream.opus",
+  name="My Backup Stream",
+  radio
+)</code></pre>
+
+<h3>How it Works</h3>
+<ul>
+  <li><code>input.alsa()</code> captures live audio.</li>
+  <li><code>playlist()</code> provides AutoDJ tracks.</li>
+  <li><code>fallback()</code> ensures music plays when live is silent.</li>
+  <li><code>output.icecast()</code> sends the mixed stream to Icecast.</li>
+</ul>
+
+<h3>Run and Auto-Start</h3>
+<pre><code>liquidsoap myradio.liq</code></pre>
+<p>To auto-start on boot, create a systemd unit:</p>
+<pre><code>[Unit]
+Description=Liquidsoap Radio
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/liquidsoap /home/YOURUSER/myradio.liq
+Restart=always
+User=YOURUSER
+Group=YOURUSER
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+</section>
+
+<section id="comparison">
+<h2>Comparison: AzuraCast vs Liquidsoap vs DarkIce</h2>
+<table>
+  <tr><th>Feature</th><th>AzuraCast</th><th>Liquidsoap</th><th>DarkIce</th></tr>
+  <tr><td>GUI Control</td><td>Yes</td><td>No</td><td>No</td></tr>
+  <tr><td>AutoDJ</td><td>Built-in</td><td>Yes (scripted)</td><td>No</td></tr>
+  <tr><td>Scheduling</td><td>Yes</td><td>Manual scripting</td><td>No</td></tr>
+  <tr><td>Live Input</td><td>Yes (DJ ports)</td><td>Yes</td><td>Yes</td></tr>
+  <tr><td>Ease of Use</td><td>Easy</td><td>Moderate</td><td>Simple</td></tr>
+  <tr><td>Best For</td><td>Full radio stations</td><td>Technical users</td><td>Simple live streams</td></tr>
+</table>
+</section>
+
+<section id="signalflow">
+<h2>Signal Flow Diagram</h2>
+<pre>
+[Microphone/Mixer]
+        |
+        v
+  [Liquidsoap or AzuraCast]
+        |
+        v
+      [Icecast]
+        |
+        v
+     [Listeners]
+</pre>
+</section>
+
+<section id="troubleshooting">
+<h2>Troubleshooting</h2>
+<h3>Audio Device Not Found</h3>
+<p>Check available devices:</p>
+<pre><code>arecord -l</code></pre>
+
+<h3>Buffering Issues</h3>
+<ul>
+  <li>Lower Opus bitrate</li>
+  <li>Use wired Ethernet</li>
+  <li>Increase Icecast queue settings or Liquidsoap buffers</li>
+</ul>
+
+<h3>Liquidsoap Crashes</h3>
+<p>Check logs: <code>/var/log/syslog</code> or <code>journalctl -u yourservice</code>.</p>
+</section>
+
+<section id="hardware">
+<h2>Hardware Recommendations</h2>
+<ul>
+  <li>USB Audio Interface (Focusrite Scarlett Solo, Behringer UMC series)</li>
+  <li>Dynamic microphone (Shure SM58 or a USB dynamic like AT2005USB)</li>
+  <li>Portable mixer for live shows</li>
+  <li>UPS battery backup for stable streaming</li>
+</ul>
+</section>
+
+<footer>
+<p>Guide last updated: November 2025. If you'd like, I can now create additional config files and pinned Docker images, or walk you through launching AzuraCast or Liquidsoap on your Ubuntu machine step-by-step while you run commands. Which do you want next?</p>
+</footer>
+</body>
+</html>
